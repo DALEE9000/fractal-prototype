@@ -44,6 +44,8 @@ Open http://localhost:3000. The Vercel CLI needs project access for the link and
 
 ## Ship and verify
 
+The [Helsinki live AIS tracker](https://harbor-ledger-wine.vercel.app/traffic/helsinki) uses [Fintraffic / Digitraffic](https://www.digitraffic.fi/en/marine-traffic/) under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). It displays recent broadcasts by MMSI and uses the provider’s millisecond report timestamp. Its imagery is from Esri World Imagery. No third-party tracking key or visitor account is required.
+
 1. Branch from the latest `main`. Run `npm test` and `npm run build` before pushing. GitHub Actions tests and compiles pushes and pull requests.
 2. Push the feature branch to GitHub. Vercel’s GitHub integration builds a preview for pushes to branches other than `main`. Find the URL under the commit’s Vercel check or in the Vercel Deployments tab. Preview links can require Vercel team sign-in.
 3. On the preview, inspect at least one current observation, switch ports, exercise archive playback, and sign in to save a port. A second account should only see its own saves. Verify any migration against the intended preview database.

@@ -111,7 +111,7 @@ export default function TrafficMap({portId}) {
   },[]);
   useEffect(()=>{data.current={area,mode,recording,playing,selected,motion};},[area,mode,recording,playing,selected,motion]);
   useEffect(()=>{
-    let timer,previous=performance.now(),lastTick=-1;
+    let timer,previous=performance.now(),lastTick=-1,lastKey='';
     function render(){
       const now=performance.now(), dt=Math.min((now-previous)/1000,.2);
       previous=now;
@@ -129,9 +129,11 @@ export default function TrafficMap({portId}) {
             return {...report,latitude:from.latitude+(report.latitude-from.latitude)*t,longitude:from.longitude+(report.longitude-from.longitude)*t};
           });
         }
-        display.current?.draw(ships,area.bounds,selected);
+        const key=ships.map(v=>[v.id,v.longitude,v.latitude,v.bearing].join(',')).join('|')+selected;
+        if(display.current && key!==lastKey){display.current.draw(ships,area.bounds,selected);lastKey=key;}
       }
-      timer=setTimeout(render,document.hidden?1000:(data.current.playing||data.current.motion)?50:400);
+      const blending=data.current.mode==='live' && data.current.motion && Array.from(lastLive.current.values()).some(v=>v.from!==v.report && now-v.received<1600);
+      timer=setTimeout(render,document.hidden?1000:(data.current.playing||blending)?40:300);
     }
     render();return ()=>clearTimeout(timer);
   },[]);
@@ -140,16 +142,16 @@ export default function TrafficMap({portId}) {
   const choice=listed.find(v=>v.id===selected);
   function time(value){return new Date(value).toISOString().slice(11,19)+' UTC';}
   return <section className="traffic" aria-label="Harbor traffic">
-    <div className="section-head"><h3>Harbor traffic</h3><div className="tabs small-tabs">{area.provider&&<button aria-pressed={!replay} onClick={()=>setMode('live')}>Live ferries</button>}<button aria-pressed={replay} onClick={()=>setMode('replay')}>AIS replay</button></div></div>
+    <div className="section-head"><h3>Harbor traffic</h3>{area.ais?<span className="overline">Live AIS</span>:<div className="tabs small-tabs">{area.provider&&<button aria-pressed={!replay} onClick={()=>setMode('live')}>Live ferries</button>}<button aria-pressed={replay} onClick={()=>setMode('replay')}>AIS replay</button></div>}</div>
     <p className="traffic-note">{replay?'Recorded AIS · November 14, 2024 · 16:00–16:30 UTC':area.provider+' vessel reports · updates every 30 seconds'}</p>
     <div className="map traffic-chart"><img src={'/charts/'+portId+'-traffic.jpg'} width="840" height="520" alt={'Harbor traffic basemap for '+portId.replaceAll('-',' ')}/><div className="fleet" ref={target}/>
       {!webgl && listed.map(v=><i key={v.id} className="vessel-dot" style={{left:100*(v.longitude-area.bounds[0])/(area.bounds[2]-area.bounds[0])+'%',top:100*(area.bounds[3]-v.latitude)/(area.bounds[3]-area.bounds[1])+'%'}}/>)}
-      <span className="map-key"><i/>{replay?'Recorded track':'Ferry position'}</span>
+      <span className="map-key"><i/>{replay?'Recorded track':area.ais?'AIS position':'Ferry position'}</span>
     </div>
-    <figcaption><span>Harbor traffic locator</span><small>Esri, Garmin, GEBCO, NOAA NGDC and contributors</small></figcaption>
+    <figcaption><span>Harbor traffic locator</span><small>{area.ais?'Esri, Vantor, Earthstar Geographics and the GIS User Community':'Esri, Garmin, GEBCO, NOAA NGDC and contributors'}</small></figcaption>
     {replay && recording && <div className="replay-controls"><button onClick={()=>setPlaying(!playing)}>{playing?'Pause':'Play'} replay</button><label>Replay time <input aria-label="Replay time" type="range" min="0" max={recording.duration} value={clock} onChange={e=>{frame.current=Number(e.target.value);setPlaying(false);setClock(frame.current);}}/></label><time>{time(Date.parse(recording.start)+clock*1000)}</time><span>20×</span></div>}
     {!replay && <button className="link" aria-pressed={motion} onClick={()=>setMotion(!motion)}>{motion?'Pause':'Enable'} position animation</button>}
     {loading?<p>Loading vessel reports…</p>:error?<p role="status">{error}</p>:listed.length===0?<p>No reports in this harbor at this time.</p>:<div className="ship-picker"><label>Inspect vessel <select value={choice?.id??''} onChange={e=>setSelected(e.target.value)}><option value="">Choose from {listed.length} vessels</option>{listed.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></label>{choice&&<p>{choice.name} · {choice.latitude.toFixed(4)}°, {choice.longitude.toFixed(4)}° · {replay?'Replay time':'Reported'} {time(choice.time)}</p>}</div>}
-    <div className="sources">{replay?<a href="https://github.com/NOAA-OCM/ocm-marinecadastre-ais-vessel-traffic">NOAA Marine Cadastre AIS archive ↗</a>:<a href={area.link}>{area.provider} position feed ↗</a>}</div>
+    <div className="sources">{replay?<a href="https://github.com/NOAA-OCM/ocm-marinecadastre-ais-vessel-traffic">NOAA Marine Cadastre AIS archive ↗</a>:<a href={area.link}>{area.provider} position feed ↗</a>}{area.ais?<a href="https://creativecommons.org/licenses/by/4.0/">AIS data · CC BY 4.0</a>:<a href="/traffic/helsinki">Open live AIS · Helsinki →</a>}</div>
   </section>;
 }
