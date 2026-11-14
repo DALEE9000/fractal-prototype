@@ -14,7 +14,7 @@ function makeShipSprite(THREE) {
   return texture;
 }
 
-export async function mountChart(node,portId,onZoom,onPick,signal) {
+export async function mountChart(node,portId,onZoom,onPick,signal,onManualPan) {
   const [module,THREE]=await Promise.all([import('leaflet'),import('three')]);
   if(signal.aborted)return null;
   const L=module.default??module;
@@ -36,6 +36,9 @@ export async function mountChart(node,portId,onZoom,onPick,signal) {
   const ctx=fieldCanvas.getContext('2d');
   const flowCanvas=document.createElement('canvas');overlay.appendChild(flowCanvas);
   const flow=flowCanvas.getContext('2d');
+  const trailCanvas=document.createElement('canvas');overlay.appendChild(trailCanvas);
+  const trailContext=trailCanvas.getContext('2d');
+  let trail=[],followId='',positionedId='';
   let shipCanvas,shipContext;
   let renderer,scene,camera,sprite;
   try{
@@ -51,6 +54,41 @@ export async function mountChart(node,portId,onZoom,onPick,signal) {
   const ships=new Map();
   let width=1,height=1,reports=[],selection='',field=null,showField=true,hitPoints=[],shipPoints=[];
   const project=(lat,lon)=>map.latLngToContainerPoint([lat,lon]);
+  function drawTrail() {
+    const ctx=trailContext;
+    ctx.clearRect(0,0,width,height);
+    ctx.lineJoin='round';ctx.lineCap='round';
+    for(const segment of trail){
+      ctx.beginPath();
+      for(const [i,point] of segment.entries()){
+        const {x,y}=project(point.latitude,point.longitude);
+        if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+      }
+      ctx.lineWidth=5;ctx.strokeStyle='#12243c';ctx.stroke();
+      ctx.lineWidth=2.5;ctx.strokeStyle='#ffcf85';ctx.stroke();
+      for(const point of segment){
+        const {x,y}=project(point.latitude,point.longitude);
+        ctx.fillStyle='#ffedcf';ctx.fillRect(x-1.5,y-1.5,3,3);
+      }
+    }
+    const selected=reports.find(v=>v.id===selection);
+    if(selected){
+      const {x,y}=project(selected.latitude,selected.longitude);
+      ctx.beginPath();ctx.arc(x,y,15,0,Math.PI*2);
+      ctx.lineWidth=3.5;ctx.strokeStyle='#12243c';ctx.stroke();
+      ctx.lineWidth=1.7;ctx.strokeStyle='#fff0bd';ctx.stroke();
+    }
+  }
+  function followShip() {
+    const ship=reports.find(v=>v.id===followId);
+    if(!ship)return;
+    const point=[ship.latitude,ship.longitude],first=positionedId!==followId;
+    const offset=map.latLngToContainerPoint(point).distanceTo(map.getSize().divideBy(2));
+    if(first || offset>1.5){
+      positionedId=followId;
+      map.setView(point,first?Math.max(map.getZoom(),11):map.getZoom(),{animate:false});
+    }
+  }
   let animateFlow=false,flowTimer,viewVisible=true;
   function paintFlow() {
     flow.clearRect(0,0,width,height);
@@ -108,15 +146,19 @@ export async function mountChart(node,portId,onZoom,onPick,signal) {
     if(renderer)renderer.render(scene,camera);
     for(const [id,marker] of ships)if(!marker.visible){scene.remove(marker);marker.material.dispose();ships.delete(id);}
   };
-  const redraw=()=>{drawField();drawShips();};
+  const redraw=()=>{drawField();drawTrail();drawShips();};
   const resize=()=>{
     const size=map.getSize();width=size.x;height=size.y;
     fieldCanvas.width=width;fieldCanvas.height=height;
     flowCanvas.width=width;flowCanvas.height=height;
+    trailCanvas.width=width;trailCanvas.height=height;
     if(shipCanvas){shipCanvas.width=width;shipCanvas.height=height;}
     if(renderer){renderer.setSize(width,height,false);camera.right=width;camera.top=height;camera.updateProjectionMatrix();}
     redraw();
   };
+  function manualPan(){if(followId){followId='';positionedId='';onManualPan();}}
+  map.on('dragstart',manualPan);
+  map.on('keydown',event=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.originalEvent.key))manualPan();});
   map.on('move zoom viewreset',redraw);map.on('zoomend',()=>onZoom(map.getZoom()));
   map.on('click',event=>{
     const p=event.containerPoint;
@@ -131,10 +173,12 @@ export async function mountChart(node,portId,onZoom,onPick,signal) {
   const visibility=new IntersectionObserver(([entry])=>{viewVisible=entry.isIntersecting;restartFlow();});
   visibility.observe(node);document.addEventListener('visibilitychange',restartFlow);
   return {
-    draw(items,_bounds,chosen){reports=items;selection=chosen;drawShips();},
+    draw(items,_bounds,chosen){reports=items;selection=chosen;followShip();drawTrail();drawShips();},
+    follow(id){if(id!==followId)positionedId='';followId=id;followShip();},
+    setTrail(segments){trail=segments;drawTrail();},
     setField(data,visible,animated){field=data;showField=visible;animateFlow=animated;drawField();},
     zoom(delta){map.setZoom(map.getZoom()+delta);},
-    fit(mode){const region=mode==='harbor'?bounds(harbors[portId].bounds):coast;map.fitBounds(region,{padding:[8,8],maxZoom:13});},
+    fit(mode){manualPan();const region=mode==='harbor'?bounds(harbors[portId].bounds):coast;map.fitBounds(region,{padding:[8,8],maxZoom:13});},
     dispose(){clearTimeout(flowTimer);visibility.disconnect();document.removeEventListener('visibilitychange',restartFlow);observer.disconnect();map.off();map.remove();for(const m of ships.values())m.material.dispose();sprite?.dispose();renderer?.dispose();overlay.remove();}
   };
 }

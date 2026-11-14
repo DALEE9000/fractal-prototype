@@ -1,5 +1,8 @@
 @font-face{font-family:Silkscreen;src:url("/fonts/Silkscreen-Regular.ttf") format("truetype");font-weight:400;font-display:swap}
 .layer-controls,.small-tabs{flex-wrap:wrap}
+.follow-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid #415e7a;font:12px/1.45 Consolas,monospace}
+.follow-bar div{display:grid;margin-right:auto}.follow-bar strong,.trail-line{color:#ffcf85}.follow-bar span{color:#b9cde0}.follow-bar button{font:inherit;background:#173752;border:1px solid #597c9e;color:#dcefff;padding:5px 8px}
+.map-legend .trail-line{display:inline-block;width:17px;border-top:3px solid;vertical-align:middle}
 .current-scale{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .current-scale span{white-space:nowrap}
 .current-scale i{display:inline-block;width:9px;height:9px;margin-right:4px;vertical-align:baseline}
