@@ -39,15 +39,26 @@ Open http://localhost:3000. The Vercel CLI needs project access for the link and
 - `lib/currents.js` requests the nearest 6 km grid cell from [NOAA HFR](https://dods.ndbc.noaa.gov/thredds/catalog/hfradar.html). Each hourly vector yields speed in knots and the direction the surface water moves toward, clockwise from true north. Coverage varies. Missing, invalid and older-than-12-hour vectors produce an unavailable state.
 - `app/api/traffic/[id]/route.js` reads the [NYC Ferry](https://www.ferry.nyc/developer-tools/) and [MBTA](https://api-v3.mbta.com/) operator feeds. It restricts reports to the harbor viewport and drops reports older than 15 minutes. The live view has ferry coverage in New York and Boston. San Francisco has archive replay.
 - `public/traffic/` contains bounded excerpts of [NOAA Marine Cadastre AIS](https://github.com/NOAA-OCM/ocm-marinecadastre-ais-vessel-traffic) for November 14, 2024, 16:00–16:30 UTC. The source file is [ais-2024-11-14.parquet](https://ocmgeodatastor1.blob.core.windows.net/marinecadastre/ais2024/ais-2024-11-14.parquet). Replay interpolates between recorded positions up to five minutes apart and runs at 20×. Live markers transition between received reports. `app/traffic-map.jsx` supports pause, reduced motion, a text vessel selector, and a fallback when WebGL is unavailable.
-- The station and harbor locator images in `public/charts/` come from the [Esri Ocean Basemap](https://services.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer). Keep the displayed credits with the maps.
+- The pixel charts use locally bundled Web Mercator rasters derived from OpenFreeMap, OpenMapTiles and © OpenStreetMap (ODbL). Keep the on-map credits. Leaflet supplies pan and zoom. Three.js renders pixel ships with a canvas fallback. The navy palette is in `app/style.css`. Silkscreen is bundled with its SIL Open Font License.
+- The HF radar layer reads bounded NetCDF3 subsets from NOAA NDBC using `lib/radar-field.js`. Pick the newest single observation hour with usable returns, up to 12 hours old. Missing grid cells stay empty. Project every arrow at its grid coordinate. Selecting an arrow reveals speed, direction toward true north and position. The offshore view shows the radar coverage. Replay dates and radar observation times are independent.
 - Add numbered SQL migrations under `db/`. The runner uses a Postgres transaction, advisory lock and migration ledger. Deploy backward-compatible changes so a previous app version can keep serving during rollouts.
 
 ## Ship and verify
 
-The [Helsinki live AIS tracker](https://harbor-ledger-wine.vercel.app/traffic/helsinki) uses [Fintraffic / Digitraffic](https://www.digitraffic.fi/en/marine-traffic/) under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). It displays recent broadcasts by MMSI and uses the provider’s millisecond report timestamp. Its imagery is from Esri World Imagery. No third-party tracking key or visitor account is required.
+The [Helsinki live AIS tracker](https://harbor-ledger-wine.vercel.app/traffic/helsinki) uses [Fintraffic / Digitraffic](https://www.digitraffic.fi/en/marine-traffic/) under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). It displays recent broadcasts by MMSI and uses the provider’s millisecond report timestamp. The optional 8× recorded passage follows SUOMENLINNA II and VICTORIA 1 from public reports captured on November 14, 2026, 16:48–16:50 UTC. No third-party tracking key or visitor account is required.
 
 1. Branch from the latest `main`. Run `npm test` and `npm run build` before pushing. GitHub Actions tests and compiles pushes and pull requests.
 2. Push the feature branch to GitHub. Vercel’s GitHub integration builds a preview for pushes to branches other than `main`. Find the URL under the commit’s Vercel check or in the Vercel Deployments tab. Preview links can require Vercel team sign-in.
 3. On the preview, inspect at least one current observation, switch ports, exercise archive playback, and sign in to save a port. A second account should only see its own saves. Verify any migration against the intended preview database.
 4. Merge to `main` to deploy production. For an already-reviewed local `main`, `npm run deploy` pushes it to the same Git trigger. Each Vercel build runs tests, applies migrations using that environment’s database variables, and builds Next.js.
 5. Check Vercel’s build state, then test the stable production URL in a browser. Sign in, save a port, refresh and inspect `public.saved_ports` in Neon. For an incident, inspect Vercel logs and revert the code through Git. A code rollback does not reverse database changes.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
