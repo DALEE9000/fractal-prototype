@@ -1,0 +1,28 @@
+{
+  "name": "harbor-ledger",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --test",
+    "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
+    "vercel-build": "npm test && npm run db:migrate && npm run build",
+    "deploy": "git push origin main"
+  },
+  "dependencies": {
+    "@neon/auth": "0.8.2",
+    "@vercel/functions": "3.11.3",
+    "gtfs-realtime-bindings": "2.2.0",
+    "next": "16.4.6",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "three": "0.187.0"
+  }
+}
