@@ -1,5 +1,11 @@
 @font-face{font-family:Silkscreen;src:url("/fonts/Silkscreen-Regular.ttf") format("truetype");font-weight:400;font-display:swap}
 .layer-controls,.small-tabs{flex-wrap:wrap}
+.ocean .radar-map{height:clamp(370px,61vh,730px)}
+.world-destinations{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:3px 0 8px}
+.world-destinations label{color:var(--muted);font-size:13px}
+.world-destinations select,.world-destinations button{font:600 13px Consolas,monospace;border:1px solid #527599;border-radius:1px;background:#193753;color:#deefff;padding:7px 10px}
+.world-scale i{display:inline-block;width:62px;height:8px;background:linear-gradient(to right,#2a186c,#0f5a91,#3b9187,#75c969,#f8ed94)}
+.world-destinations select{margin-left:5px}.ocean details summary{cursor:pointer}
 .follow-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid #415e7a;font:12px/1.45 Consolas,monospace}
 .follow-bar div{display:grid;margin-right:auto}.follow-bar strong,.trail-line{color:#ffcf85}.follow-bar span{color:#b9cde0}.follow-bar button{font:inherit;background:#173752;border:1px solid #597c9e;color:#dcefff;padding:5px 8px}
 .map-legend .trail-line{display:inline-block;width:17px;border-top:3px solid;vertical-align:middle}

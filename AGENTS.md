@@ -34,6 +34,10 @@ Open http://localhost:3000. The Vercel CLI needs project access for the link and
 
 ## Code and data
 
+The [world ocean explorer](https://harbor-ledger-wine.vercel.app/ocean) is a static page. World coastlines come from OpenFreeMap vector tiles. Free Copernicus Marine WMTS serves the six-hourly surface velocity layer in Global Ocean Physics (DOI 10.48670/moi-00016). The global layer shows forecast valid time and modeled vectors. Map colors use the provider's haline palette from 0 to 1.5 m/s. Clicking water reads the u and v components at a model cell. Animations sample a small cached set of points in the visitor's viewport. NOAA measured radar remains in the harbor views.
+
+At zoom 8 or closer the browser subscribes to a bounded AIS window where it fits the anonymous provider limit. A viewport crossing the date line uses two boxes on one connection. Ports and ocean presets are shareable via `/ocean?place=rotterdam`. All world map, current and AIS requests go directly to the public providers. The explorer requires no API keys, paid services, database jobs or new infrastructure. If a provider is unavailable, show the affected layer's status and continue serving the other layers.
+
 - `app/harbor.jsx` renders the port directory and watchlist. `app/api/saved/route.js` derives ownership from the server session, checks write origins, and uses parameterized SQL. `public.saved_ports` has one row per user and port. Managed identities and sessions live in `neon_auth`.
 - `lib/ports.js` pairs each harbor tide gauge with an offshore buoy. `lib/marine.js` reads [CO-OPS water levels](https://api.tidesandcurrents.noaa.gov/api/prod/) and [NDBC buoy reports](https://www.ndbc.noaa.gov/). Water levels are relative to mean lower low water. Buoy variables keep their individual report times.
 - `lib/currents.js` requests the nearest 6 km grid cell from [NOAA HFR](https://dods.ndbc.noaa.gov/thredds/catalog/hfradar.html). Each hourly vector yields speed in knots and the direction the surface water moves toward, clockwise from true north. Coverage varies. Missing, invalid and older-than-12-hour vectors produce an unavailable state.

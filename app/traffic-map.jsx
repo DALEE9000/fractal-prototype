@@ -5,8 +5,11 @@ import { harbors, interpolate } from '../lib/traffic.js';
 import { mountChart } from './chart-engine.js';
 import { charts } from '../lib/chart-areas.js';
 import { currentBands } from '../lib/current-scale.js';
-import { watchUsAis } from '../lib/us-ais.js';
+import { receiverLabel, watchUsAis } from '../lib/us-ais.js';
 import { recentAisTrack, rememberReports, trailSegments } from '../lib/vessel-trail.js';
+import { oceanPlaces, forecastTime, fetchVector, sampleForecast } from '../lib/world-ocean.js';
+
+const worldArea={};
 
 function displayedPosition(track,now,animate) {
   const {report,from,received,duration}=track;
@@ -17,7 +20,8 @@ function displayedPosition(track,now,animate) {
 }
 
 export default function TrafficMap({portId,initialReplay=false}) {
-  const area=harbors[portId];
+  const world=portId==='world';
+  const area=world?worldArea:harbors[portId];
   const [mode,setMode]=useState(initialReplay?'replay':area.ais?'live':'us-ais');
   const usAis=mode==='us-ais';
   const [streamStatus,setStreamStatus]=useState('Connecting');
@@ -42,16 +46,53 @@ export default function TrafficMap({portId,initialReplay=false}) {
   const [radar,setRadar]=useState(null);
   const [radarError,setRadarError]=useState(false);
   const [inspect,setInspect]=useState(null);
-  const supportsRadar=Boolean(charts[portId].region);
+  const supportsRadar=Boolean(charts[portId]?.region);
+  const [aisWindow,setAisWindow]=useState('');
+  const [samples,setSamples]=useState('');
+  const [validTime,setValidTime]=useState('');
+  const [forecastNotice,setForecastNotice]=useState('');
+  const [mapNotice,setMapNotice]=useState('');
+  const [waterPoint,setWaterPoint]=useState(null);
+  const [pointStatus,setPointStatus]=useState('');
   const target=useRef(null);
   const display=useRef(null);
   const frame=useRef(60);
   const data=useRef({});
   const lastLive=useRef(new Map());
   const reduced=useRef(false);
+  useEffect(()=>{
+    if(!world)return;
+    const refresh=()=>setValidTime(forecastTime());
+    refresh();const timer=setInterval(refresh,60000);return ()=>clearInterval(timer);
+  },[world]);
+  useEffect(()=>{
+    if(!world||!ready||!validTime)return;
+    display.current?.forecast(validTime,showRadar);
+  },[world,ready,validTime,showRadar]);
+  useEffect(()=>{
+    if(!world)return;
+    setRadar(null);setRadarError(false);
+    if(!samples||!showRadar||!flowMotion||!validTime)return;
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>sampleForecast(samples,validTime,ctrl.signal)
+      .then(field=>{if(!ctrl.signal.aborted)setRadar(field);})
+      .catch(()=>{if(!ctrl.signal.aborted)setRadarError(true);}),650);
+    return ()=>{clearTimeout(timer);ctrl.abort();};
+  },[world,samples,showRadar,flowMotion,validTime]);
+  useEffect(()=>{
+    if(!world)return;
+    setInspect(null);setPointStatus('');
+    if(!waterPoint||!validTime||!showRadar)return;
+    const ctrl=new AbortController();setPointStatus('Reading forecast…');
+    fetchVector(waterPoint.lat,waterPoint.lon,validTime,ctrl.signal).then(vector=>{
+      if(ctrl.signal.aborted)return;
+      setInspect(vector?{vector}:null);setPointStatus(vector?'':'No modeled surface current at this location.');
+    }).catch(()=>{if(!ctrl.signal.aborted)setPointStatus('Forecast reading unavailable. Select the water to retry.');});
+    return ()=>ctrl.abort();
+  },[world,waterPoint,showRadar,validTime]);
   function selectShip(ship){
     setSelected(ship?.id || '');setSelectedName(ship?.name || ship?.id || '');
-    setFollowing(Boolean(ship));setInspect(null);
+    setFollowing(Boolean(ship));setInspect(null);setWaterPoint(null);setPointStatus('');
   }
   useEffect(()=>{
     const pref=matchMedia('(prefers-reduced-motion: reduce)');
@@ -61,8 +102,9 @@ export default function TrafficMap({portId,initialReplay=false}) {
   useEffect(()=>{
     const ctrl=new AbortController();
     let timer;
-    setError('');setLoading(true);setSelected('');setLive([]);setRecording(null);setPlaying(false);
-    lastLive.current=new Map();liveTrails.current.clear();setFollowing(false);
+    setError('');setLoading(true);setLive([]);setRecording(null);setPlaying(false);
+    if(!world){setSelected('');liveTrails.current.clear();setFollowing(false);}
+    lastLive.current=new Map();
     function receive(vessels) {
       rememberReports(liveTrails.current,vessels);
       const received=performance.now(),previous=lastLive.current;
@@ -78,7 +120,8 @@ export default function TrafficMap({portId,initialReplay=false}) {
     }
     if(mode==='us-ais'){
       setStreamStatus('Connecting');
-      return watchUsAis(charts[portId].bounds,(vessels,status)=>{
+      if(world&&!aisWindow){setLoading(false);setStreamStatus('Zoom closer');return;}
+      return watchUsAis(world?aisWindow.split(',').map(Number):charts[portId].bounds,(vessels,status)=>{
         receive(vessels);setStreamStatus(status);setLoading(false);
       });
     }
@@ -99,19 +142,21 @@ export default function TrafficMap({portId,initialReplay=false}) {
       }
     }
     update();return ()=>{ctrl.abort();clearTimeout(timer);};
-  },[mode,portId]);
+  },[mode,portId,world,aisWindow]);
   useEffect(()=>{
     const lifetime=new AbortController();
+    const place=world?new URLSearchParams(location.search).get('place'):null;
+    const options=world?{place:Object.hasOwn(oceanPlaces,place)?place:'world',onWindow:setAisWindow,onSamples:setSamples,onWaterClick:setWaterPoint,onForecastStatus:setForecastNotice,onMapError:setMapNotice}:null;
     mountChart(target.current,portId,setZoom,hit=>{
       if(hit.ship){selectShip(hit.ship);}
       else setInspect(hit);
-    },lifetime.signal,()=>setFollowing(false)).then(chart=>{
+    },lifetime.signal,()=>setFollowing(false),options).then(chart=>{
       if(!chart)return;
       if(lifetime.signal.aborted){chart.dispose();return;}
       display.current=chart;setReady(true);
     }).catch(()=>{if(!lifetime.signal.aborted)setError('Map unavailable. Reload to retry.');});
     return ()=>{lifetime.abort();display.current?.dispose();display.current=null;};
-  },[portId]);
+  },[portId,world]);
   useEffect(()=>{
     if(!supportsRadar)return;
     const ctrl=new AbortController();let timer;
@@ -192,12 +237,21 @@ export default function TrafficMap({portId,initialReplay=false}) {
   function time(value){return new Date(value).toISOString().slice(11,19)+' UTC';}
   const trailStart=segments[0]?.[0]?.time;
   const utcOffset=replay&&recording?Date.parse(recording.start):0;
+  function goTo(id){
+    if(!Object.hasOwn(oceanPlaces,id))return;
+    selectShip(null);setForecastNotice('');setMapNotice('');
+    display.current?.go(oceanPlaces[id]);
+    const url=new URL(location.href);
+    if(id==='world')url.searchParams.delete('place');else url.searchParams.set('place',id);
+    history.replaceState(null,'',url);
+  }
   return <section className="traffic" aria-label="Harbor traffic">
-    <div className="section-head"><h3>Traffic chart</h3><div className="tabs small-tabs">{supportsRadar&&<button aria-pressed={usAis} onClick={()=>setMode('us-ais')}>Live AIS</button>}{area.provider&&<button aria-pressed={mode==='live'} onClick={()=>setMode('live')}>{area.ais?'Live AIS':'Live ferries'}</button>}<button aria-pressed={replay} onClick={()=>setMode('replay')}>{area.ais?'Recorded passage':'AIS replay'}</button></div></div>
-    <p className="traffic-note">{replay?replayNote:usAis?'Open Waters AIS · '+streamStatus+' · '+live.length+' vessels reported in the last 15 min':area.provider+' vessel reports · updates every 30 seconds'}{!selected&&' · Click a ship to follow its track.'}</p>
+    {world?<div className="world-destinations"><label>Fly to <select value="" disabled={!ready} onChange={e=>goTo(e.target.value)}><option value="" disabled>Choose a region</option>{Object.entries(oceanPlaces).map(([id,p])=><option key={id} value={id}>{p.label}</option>)}</select></label><button disabled={!ready} onClick={()=>goTo('rotterdam')}>Rotterdam</button><button disabled={!ready} onClick={()=>goTo('singapore')}>Singapore Strait</button><button disabled={!ready} onClick={()=>goTo('world')}>World view</button></div>:
+    <div className="section-head"><h3>Traffic chart</h3><div className="tabs small-tabs">{supportsRadar&&<button aria-pressed={usAis} onClick={()=>setMode('us-ais')}>Live AIS</button>}{area.provider&&<button aria-pressed={mode==='live'} onClick={()=>setMode('live')}>{area.ais?'Live AIS':'Live ferries'}</button>}<button aria-pressed={replay} onClick={()=>setMode('replay')}>{area.ais?'Recorded passage':'AIS replay'}</button></div></div>}
+    <p className="traffic-note">{world&&!aisWindow?'Zoom into a coast or choose a port to see recent AIS reports.':replay?replayNote:usAis?'Open Waters AIS · '+streamStatus+' · '+live.length+' vessels reported in the last 15 min':area.provider+' vessel reports · updates every 30 seconds'}{!selected&&(!world||aisWindow)&&' · Click a ship to follow its track.'}</p>
     <div className="instrument">
       <div className="map-controls">
-        <div className="layer-controls">{supportsRadar && <button aria-pressed={showRadar} onClick={()=>{setShowRadar(!showRadar);setInspect(null);}}><i className="cyan-dot"/> HF radar</button>}{supportsRadar&&showRadar&&<button aria-pressed={flowMotion} onClick={()=>setFlowMotion(!flowMotion)}>Animate currents</button>}{usAis&&<button aria-pressed={underway} title="Show vessels reporting at least 1 knot" onClick={()=>setUnderway(!underway)}>Moving ships</button>}<button onClick={()=>display.current?.fit('harbor')} disabled={!ready}>Harbor</button>{supportsRadar&&<button onClick={()=>{setShowRadar(true);display.current?.fit('coast');}} disabled={!ready}>Offshore</button>}</div>
+        <div className="layer-controls">{(supportsRadar||world) && <button aria-pressed={showRadar} onClick={()=>{setShowRadar(!showRadar);setInspect(null);}}><i className="cyan-dot"/> {world?'Forecast currents':'HF radar'}</button>}{(supportsRadar||world)&&showRadar&&<button aria-pressed={flowMotion} onClick={()=>setFlowMotion(!flowMotion)}>Animate currents</button>}{usAis&&(!world||aisWindow)&&<button aria-pressed={underway} title="Show vessels reporting at least 1 knot" onClick={()=>setUnderway(!underway)}>Moving ships</button>}{!world&&<button onClick={()=>display.current?.fit('harbor')} disabled={!ready}>Harbor</button>}{supportsRadar&&<button onClick={()=>{setShowRadar(true);display.current?.fit('coast');}} disabled={!ready}>Offshore</button>}</div>
         <div className="zoom-controls"><button aria-label="Zoom out" disabled={!ready} onClick={()=>display.current?.zoom(-1)}>−</button><output aria-label="Map zoom">{zoom?zoom.toFixed(1):'…'}</output><button aria-label="Zoom in" disabled={!ready} onClick={()=>display.current?.zoom(1)}>+</button></div>
       </div>
       <div className="radar-map" ref={target} aria-label="Interactive harbor chart. Select a ship to follow it. Use plus and minus to zoom, and arrow keys to pan."/>
@@ -207,15 +261,20 @@ export default function TrafficMap({portId,initialReplay=false}) {
         <button aria-label="Clear selected vessel and trail" onClick={()=>selectShip(null)}>✕</button></div>}
       <div className="map-legend"><span><i className="ship-dot"/>{replay?'Recorded vessels':usAis&&underway?'Ships ≥1 kt':usAis||area.ais?'AIS vessels':'Live ferries'}</span>
       {supportsRadar&&showRadar&&<div className="current-scale" aria-label="Surface current speed in knots"><strong>↗ Current (kt)</strong>{currentBands.map(b=><span key={b.label}><i style={{background:b.color}}/>{b.label}</span>)}</div>}
+      {world&&showRadar&&<span className="world-scale">Forecast speed · 0 <i/> 2.9+ kt</span>}
       {selected&&<span><i className="trail-line"/> Reported track</span>}
       <span className="map-credit"><a href="https://openfreemap.org/">OpenFreeMap</a> · <a href="https://openmaptiles.org/">OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright">© OSM</a></span></div>
     </div>
+    {world&&showRadar&&<p className="field-status" role="status">Copernicus surface forecast{validTime&&' · valid '+validTime.slice(0,16).replace('T',' ')+' UTC'} · Select water to read speed and direction. {forecastNotice|| (radarError?'Animated samples temporarily unavailable.':'')}</p>}
+    {world&&pointStatus&&<p className="field-pick" role="status">{pointStatus}</p>}
+    {world&&mapNotice&&<p className="field-status">{mapNotice}</p>}
     {usAis&&<div className="ais-credit"><a href="https://openwaters.io/ais/">Open Waters AIS</a> · <a href="https://www.aishub.net/">Data: AISHub contributors</a> · <a href="https://openwaters.io/ais/#license">Receiver credits &amp; licenses</a></div>}
+    {world&&<details className="ais-credit"><summary>Regional data credits</summary>Contains data under the Norwegian licence for Open Government data (NLOD) distributed by the Norwegian Coastal Administration. Data delivered by BarentsWatch. <a href="https://data.norge.no/nlod/en/2.0">NLOD 2.0</a>. Source: Fintraffic / digitraffic.fi, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Open Waters volunteer aggregate · ODbL.</details>}
     {supportsRadar&&showRadar&&<p className="field-status" role="status">{radar?.time?'Latest NOAA HFR · '+radar.time.slice(0,16).replace('T',' ')+' UTC · '+radar.vectors.length+' grid cells'+(radarError?' · update delayed':'') :radarError?'NOAA radar temporarily unavailable.':radar?'No recent radar vectors in this area.':'Loading NOAA radar grid…'}{radar?.time&&(replay?' · Current observations overlay archived traffic.':' · Select an arrow to inspect.')}</p>}
     {inspect&&showRadar&&<p className="field-pick">{inspect.vector.knots.toFixed(2)} kt {inspect.vector.bearing===null?'· calm':'toward '+Math.round(inspect.vector.bearing)%360+'° true'} · {inspect.vector.lat.toFixed(3)}°, {inspect.vector.lon.toFixed(3)}°</p>}
     {replay && recording && <div className="replay-controls"><button onClick={()=>setPlaying(!playing)}>{playing?'Pause':'Play'} replay</button><label>Replay time <input aria-label="Replay time" type="range" min="0" max={recording.duration} value={clock} onChange={e=>{frame.current=Number(e.target.value);setPlaying(false);setClock(frame.current);}}/></label><time>{time(Date.parse(recording.start)+clock*1000)}</time><span>{recording.playbackRate||20}×</span></div>}
-    {!replay && <button className="link" aria-pressed={motion} onClick={()=>setMotion(!motion)}>{motion?'Pause':'Enable'} position animation</button>}
-    {loading?<p>Loading vessel reports…</p>:error?<p role="status">{error}</p>:listed.length===0?<p>{usAis&&underway?'No vessels currently reporting 1 kt or faster.':'No recent vessel reports in this harbor.'}</p>:<div className="ship-picker"><label>Inspect vessel <select value={choice?.id??''} onChange={e=>selectShip(listed.find(v=>v.id===e.target.value))}><option value="">Choose from {listed.length} vessels</option>{listed.map(v=><option key={v.id} value={v.id}>{v.name}{v.kind?' · '+v.kind:''}</option>)}</select></label>{choice&&<p>{choice.name}{choice.kind&&' · '+choice.kind}{Number.isFinite(choice.speed)&&' · '+choice.speed.toFixed(1)+' kt'} · {choice.latitude.toFixed(4)}°, {choice.longitude.toFixed(4)}° · {replay?'Replay time':'Reported'} {time(choice.time)}{usAis&&' · '+(choice.source==='aishub'?'AISHub':'Volunteer receiver')}</p>}</div>}
-    <div className="sources">{replay&&!area.ais?<a href="https://github.com/NOAA-OCM/ocm-marinecadastre-ais-vessel-traffic">NOAA Marine Cadastre AIS archive ↗</a>:!usAis&&<a href={area.link}>{area.provider} position feed ↗</a>}{area.ais?<a href="https://creativecommons.org/licenses/by/4.0/">AIS data · CC BY 4.0</a>:<a href="/traffic/helsinki">Open live AIS · Helsinki →</a>}</div>
+    {!replay && (!world||aisWindow)&&<button className="link" aria-pressed={motion} onClick={()=>setMotion(!motion)}>{motion?'Pause':'Enable'} position animation</button>}
+    {world&&!aisWindow&&!error?null:loading?<p>Loading vessel reports…</p>:error?<p role="status">{error}</p>:listed.length===0?<p>{usAis&&underway?'No vessels currently reporting 1 kt or faster.':world?'No recent AIS reports received in this area.':'No recent vessel reports in this harbor.'}</p>:<div className="ship-picker"><label>Inspect vessel <select value={choice?.id??''} onChange={e=>selectShip(listed.find(v=>v.id===e.target.value))}><option value="">Choose from {listed.length} vessels</option>{listed.map(v=><option key={v.id} value={v.id}>{v.name}{v.kind?' · '+v.kind:''}</option>)}</select></label>{choice&&<p>{choice.name}{choice.kind&&' · '+choice.kind}{Number.isFinite(choice.speed)&&' · '+choice.speed.toFixed(1)+' kt'} · {choice.latitude.toFixed(4)}°, {choice.longitude.toFixed(4)}° · {replay?'Replay time':'Reported'} {time(choice.time)}{usAis&&' · '+receiverLabel(choice.source)}</p>}</div>}
+    <div className="sources">{world&&<><a href="https://doi.org/10.48670/moi-00016">EU Copernicus Marine Service · Global Ocean Physics ↗</a><a href="/?port=new-york">Measured HF radar · New York</a><a href="/?port=boston">Boston</a><a href="/?port=san-francisco">San Francisco</a></>}{replay&&!area.ais?<a href="https://github.com/NOAA-OCM/ocm-marinecadastre-ais-vessel-traffic">NOAA Marine Cadastre AIS archive ↗</a>:!usAis&&<a href={area.link}>{area.provider} position feed ↗</a>}{area.ais?<a href="https://creativecommons.org/licenses/by/4.0/">AIS data · CC BY 4.0</a>:<a href="/traffic/helsinki">Open live AIS · Helsinki →</a>}</div>
   </section>;
 }

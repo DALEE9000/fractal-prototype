@@ -61,7 +61,7 @@ export default function Harbor(){
   const visible=ports.filter(p=>(!onlySaved||saved.includes(p.id)) && (p.name+' '+p.region).toLowerCase().includes(query.toLowerCase().trim()));
   return <>
     <header><div className="mast"><a className="brand" href="/"><img className="brand-ship" src="/harbor-sprite.png" alt="" width="36" height="28"/>Harbor Ledger</a>
-    <div className="header-actions"><a href="/traffic/helsinki">Live AIS</a><button className="account" disabled={isPending} onClick={session?.user?logout:()=>setModal(true)}>{session?.user?'Sign out':'Sign in'}</button></div></div></header>
+    <div className="header-actions"><a href="/ocean">World ocean</a><a href="/traffic/helsinki">Helsinki AIS</a><button className="account" disabled={isPending} onClick={session?.user?logout:()=>setModal(true)}>{session?.user?'Sign out':'Sign in'}</button></div></div></header>
     <main><div className="intro"><div><p className="overline">Port directory</p><h1>Coastal conditions</h1></div><img className="harbor-scene" src="/harbor-night.png" alt="" width="320" height="94"/></div>
     <div className="desk"><aside aria-label="Port directory"><label htmlFor="search">Find a port</label><input id="search" type="search" placeholder="Search ports or states" value={query} onChange={e=>setQuery(e.target.value)}/>
     <div className="tabs"><button aria-pressed={!onlySaved} onClick={()=>setOnlySaved(false)}>All ports</button><button aria-pressed={onlySaved} onClick={()=>session?.user?setOnlySaved(true):setModal(true)}>Saved{session?.user?' ('+saved.length+')':''}</button></div>

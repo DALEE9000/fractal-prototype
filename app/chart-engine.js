@@ -1,6 +1,7 @@
 import { charts,basemapBounds } from '../lib/chart-areas.js';
 import { harbors } from '../lib/traffic.js';
 import { currentColor } from '../lib/current-scale.js';
+import { adjacentLon, oceanPlaces, wrapLon } from '../lib/world-ocean.js';
 
 function makeShipSprite(THREE) {
   const pattern=[
@@ -14,23 +15,28 @@ function makeShipSprite(THREE) {
   return texture;
 }
 
-export async function mountChart(node,portId,onZoom,onPick,signal,onManualPan) {
+export async function mountChart(node,portId,onZoom,onPick,signal,onManualPan,world) {
   const [module,THREE]=await Promise.all([import('leaflet'),import('three')]);
+  const worldModule=world?await import('./world-layers.js'):null;
   if(signal.aborted)return null;
   const L=module.default??module;
   const chart=charts[portId];
   const bounds=([w,s,e,n])=>L.latLngBounds([s,w],[n,e]);
-  const coast=bounds(chart.bounds), harbor=bounds(harbors[portId].bounds);
-  const map=L.map(node,{zoomControl:false,attributionControl:false,zoomSnap:0.25,zoomDelta:0.5,minZoom:7,maxZoom:15,zoomAnimation:false,fadeAnimation:false,maxBounds:coast.pad(.08),maxBoundsViscosity:1,keyboard:true});
-  map.fitBounds(chart.region?harbor.extend(chart.buoy):harbor,{padding:[14,14]});
-  const whole=L.latLngBounds(coast.getSouthWest(),coast.getNorthEast());
-  const limit=()=>map.setMinZoom(Math.max(7,map.getBoundsZoom(whole,false)-.25));
+  const coast=world?null:bounds(chart.bounds), harbor=world?null:bounds(harbors[portId].bounds);
+  const map=L.map(node,{zoomControl:false,attributionControl:false,zoomSnap:world?1:0.25,zoomDelta:world?1:0.5,minZoom:world?2:7,maxZoom:15,zoomAnimation:false,fadeAnimation:false,maxBounds:world?undefined:coast.pad(.08),worldCopyJump:Boolean(world),maxBoundsViscosity:1,keyboard:true});
+  let worldLayers;
+  if(world){
+    const place=oceanPlaces[world.place]||oceanPlaces.world;
+    map.setView(place.center,place.zoom);
+    worldLayers=worldModule.addWorldLayers(L,map,world,signal);
+  }else map.fitBounds(chart.region?harbor.extend(chart.buoy):harbor,{padding:[14,14]});
+  const limit=()=>{if(!world)map.setMinZoom(Math.max(7,map.getBoundsZoom(coast,false)-.25));};
   limit();
-  L.imageOverlay('/charts/'+portId+'-pixel.png',bounds(basemapBounds(chart.bounds)),{interactive:false,className:'pixel-geography'}).addTo(map);
+  if(!world)L.imageOverlay('/charts/'+portId+'-pixel.png',bounds(basemapBounds(chart.bounds)),{interactive:false,className:'pixel-geography'}).addTo(map);
   const placeLayer=L.layerGroup().addTo(map);
   const label=(text,point,kind)=>L.marker(point,{interactive:false,keyboard:false,icon:L.divIcon({className:'chart-label '+kind,html:text,iconAnchor:[0,0],iconSize:null})}).addTo(placeLayer);
-  for(const [text,lat,lon] of chart.labels)label(text,[lat,lon],'place');
-  if(chart.station){label('◆ Tide gauge',chart.station,'gauge');label('◆ Buoy',chart.buoy,'buoy');}
+  for(const [text,lat,lon] of chart?.labels||[])label(text,[lat,lon],'place');
+  if(chart?.station){label('◆ Tide gauge',chart.station,'gauge');label('◆ Buoy',chart.buoy,'buoy');}
   const overlay=document.createElement('div');overlay.className='projected-layer';node.appendChild(overlay);
   const fieldCanvas=document.createElement('canvas');overlay.appendChild(fieldCanvas);
   const ctx=fieldCanvas.getContext('2d');
@@ -53,7 +59,8 @@ export async function mountChart(node,portId,onZoom,onPick,signal,onManualPan) {
   }
   const ships=new Map();
   let width=1,height=1,reports=[],selection='',field=null,showField=true,hitPoints=[],shipPoints=[];
-  const project=(lat,lon)=>map.latLngToContainerPoint([lat,lon]);
+  const near=lon=>world?adjacentLon(lon,map.getCenter().lng):lon;
+  const project=(lat,lon)=>map.latLngToContainerPoint([lat,near(lon)]);
   function drawTrail() {
     const ctx=trailContext;
     ctx.clearRect(0,0,width,height);
@@ -62,7 +69,7 @@ export async function mountChart(node,portId,onZoom,onPick,signal,onManualPan) {
       ctx.beginPath();
       for(const [i,point] of segment.entries()){
         const {x,y}=project(point.latitude,point.longitude);
-        if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+        if(i===0 || (world&&Math.abs(near(point.longitude)-near(segment[i-1].longitude))>180))ctx.moveTo(x,y);else ctx.lineTo(x,y);
       }
       ctx.lineWidth=5;ctx.strokeStyle='#12243c';ctx.stroke();
       ctx.lineWidth=2.5;ctx.strokeStyle='#ffcf85';ctx.stroke();
@@ -82,7 +89,7 @@ export async function mountChart(node,portId,onZoom,onPick,signal,onManualPan) {
   function followShip() {
     const ship=reports.find(v=>v.id===followId);
     if(!ship)return;
-    const point=[ship.latitude,ship.longitude],first=positionedId!==followId;
+    const point=[ship.latitude,near(ship.longitude)],first=positionedId!==followId;
     const offset=map.latLngToContainerPoint(point).distanceTo(map.getSize().divideBy(2));
     if(first || offset>1.5){
       positionedId=followId;
@@ -115,7 +122,7 @@ export async function mountChart(node,portId,onZoom,onPick,signal,onManualPan) {
       const nw=project(v.lat+latRadius,v.lon-lonRadius),se=project(v.lat-latRadius,v.lon+lonRadius);
       if(se.x<0||se.y<0||nw.x>width||nw.y>height)continue;
       const color=currentColor(v.knots),angle=(v.bearing??0)*Math.PI/180;
-      const travel=Math.max(9,Math.min(70,(se.x-nw.x)*.75,(se.y-nw.y)*.75));
+      const travel=field.forecast?38:Math.max(9,Math.min(70,(se.x-nw.x)*.75,(se.y-nw.y)*.75));
       hitPoints.push({x,y,v,nw,se,color,travel,dx:Math.sin(angle),dy:-Math.cos(angle),seed:Math.abs(v.lon*31+v.lat*13)%1});
       ctx.fillStyle=color;ctx.globalAlpha=.29;
       ctx.fillRect(nw.x,nw.y,Math.max(0,se.x-nw.x-1),Math.max(0,se.y-nw.y-1));ctx.globalAlpha=1;
@@ -167,6 +174,7 @@ export async function mountChart(node,portId,onZoom,onPick,signal,onManualPan) {
     if(ship){onPick({ship:ship.item});return;}
     const match=hitPoints.find(c=>p.x>=c.nw.x&&p.x<c.se.x&&p.y>=c.nw.y&&p.y<c.se.y) || nearest(hitPoints,5);
     if(match){onPick({vector:match.v,time:field.time});}
+    else if(world)world.onWaterClick({lat:event.latlng.lat,lon:wrapLon(event.latlng.lng)});
   });
   const observer=new ResizeObserver(()=>{map.invalidateSize({pan:false});limit();resize();});
   observer.observe(node);resize();onZoom(map.getZoom());
@@ -177,8 +185,10 @@ export async function mountChart(node,portId,onZoom,onPick,signal,onManualPan) {
     follow(id){if(id!==followId)positionedId='';followId=id;followShip();},
     setTrail(segments){trail=segments;drawTrail();},
     setField(data,visible,animated){field=data;showField=visible;animateFlow=animated;drawField();},
+    forecast(time,visible){worldLayers?.forecast(time,visible);},
+    go(place){manualPan();map.setView(place.center,place.zoom);},
     zoom(delta){map.setZoom(map.getZoom()+delta);},
     fit(mode){manualPan();const region=mode==='harbor'?bounds(harbors[portId].bounds):coast;map.fitBounds(region,{padding:[8,8],maxZoom:13});},
-    dispose(){clearTimeout(flowTimer);visibility.disconnect();document.removeEventListener('visibilitychange',restartFlow);observer.disconnect();map.off();map.remove();for(const m of ships.values())m.material.dispose();sprite?.dispose();renderer?.dispose();overlay.remove();}
+    dispose(){worldLayers?.dispose();clearTimeout(flowTimer);visibility.disconnect();document.removeEventListener('visibilitychange',restartFlow);observer.disconnect();map.off();map.remove();for(const m of ships.values())m.material.dispose();sprite?.dispose();renderer?.dispose();overlay.remove();}
   };
 }
